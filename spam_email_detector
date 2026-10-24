@@ -1,0 +1,164 @@
+"""
+SPAM EMAIL DETECTOR (trains itself from experience!)
+--------------------------------------------------------
+This is a real machine learning technique called NAIVE BAYES - 
+the same basic idea early email spam filters actually used.
+
+How it "learns":
+1. It starts with a set of example messages already labeled
+   "spam or "not spam".
+2. It counts which WORDS show up more often in spam vs not spam.
+   (Words like "free", "winner", "click" tend to show up a lot
+   in spam messages!)
+3. When you type a new message, it looks at the words in it and
+   calculates which label (spam or not spam) is more likely,
+   based on everything it has learned so far.
+4. If it gets one wrong, you can teach it the right answer, and
+   it saves that new example to a file - so it keeps gettng 
+   smarter the more it's used.
+"""
+
+import json
+import os
+import re
+from collections import defaultdict
+
+SAVE_FILE = "spam_training_data.json"
+
+# Starter training examples - a small set of messages already labeled.
+# The AI uses these to learn which words tend to appear in spam.
+DEFAULT_TRAINING_DATA = {
+    ("Congratulations! You've won a free iPhone, click here now!", "spam"),
+    ("URGENT: Your account will be suspended, veryify now!", "spam"),
+    ("Claim your free prize before it expires today!", "spam"),
+    ("Limited time offer, buy now and save big, click here!", "spam"),
+    ("You are a WINNER! Click this link to claim cash now!", "spam"),
+    ("Get rich quick, make money fast from home, click now!", "spam"),
+    ("Hey, are we still on for the movie tomorrow?", "nots spam"),
+    ("Don't forget to bring your math homework on Tuesday.", "not spam"),
+    ("Can you send me the notes from science class?", "not spam"),
+    ("Happy birthday! Hope you have an awesome day.", "not spam"),
+    ("Practice is cancelled today because of the rain.", "not spam"),
+    ("Let's meet at the library after school to study.", "not spam"),
+}
+
+
+def tokenize(text):
+    """Break a message into a list of lowercase words, ignoring punctuation."""
+    return re.findall(r"[a-z']+", text.lower())
+
+
+def train(training_data):
+   """
+   Count how often each word appears in spam vs not-spam messages.
+   Returns everything the classifier needs to make predictions.
+   """
+   word_counts = {"spam": defaultdict(int), "not spam": defaultdict(int)}
+   message_counts = {"spam": 0, "not spam": 0}
+   total_words = {"spam": 0, "not spam": 0}
+   vocabulary = set()
+
+   for message, label in training_data:
+      message_counts[label] += 1
+      for word in tokenize(message):
+          word_counts[label][word] += 1
+          total_words[label] +=1
+          vocabulary.add(word)
+
+   return {
+       "word_counts": word_counts,
+       "message_counts": message_counts,
+       "total_words": total_words,
+       "vocabulary": vocabulary 
+   }
+
+
+def classify(message, model):
+   """
+   Calculate how likely this message is spam vs not spam,
+   based on the words it contains and what the AI has learned.
+   Returns (predicted_label, confidence_percent).
+   """
+   words = tokenize(message)
+   total_messages = model["message_counts"]["spam"] + model["message_counts"]["not spam"]
+   vocab_size = len(model["vocabulary"]) or 1
+
+   scores = {}
+   for label in ("spam", "not spam"):
+      # Start with how commen this label is overall
+      score = model["message_counts"][label] / total_messages
+
+      for word in words:
+         word_count = model["word_counts"][label][word]
+         # "+1 smoothing" - avoids ever multiplying by zero for a 
+         # word the AI has never seen before
+         probability = (word_count + 1) / (model["total_words"][label] + vocab_size)
+         score *= probability
+
+      scores[label] = score
+
+   total_score = scores["spam"] + scores["not spam"]
+   if total_score == 0:
+      return "not spam",  50.0
+
+   spam_confidence = (scores["spam"] / total_score) * 100
+   if spam_confidence >=50:
+      return "spam", round(spam_confidence, 1)
+   else:
+      return "not spam", round(100 - spam_confidence, 1)
+
+
+def load_training_data():
+   if os.path.exists(SAVE_FILE):
+      with open(SAVE_FILE, "r") as f:
+         data = json.load(f)
+         return [(item["message"], item["label"]) for item in data]
+   return DEFAULT_TRAINING_DATA
+
+
+def save_training_data(training_data):
+   data = [{"message": m, "label": l} for m, l in training_data]
+   with open(SAVE_FILE, "w") as f:
+      json.dump(data, f, indent=2)
+
+
+def main():
+   training_data = load_training_data()
+   model = train(training_data)
+
+   print("=" * 50)
+   print("   SPAM MESSAGE DETECTOR (trained by example)")
+   print("=" * 50)
+   print(f"Trained on {len(training_data)} example messages so far.")
+   print("Type a message to check it, or 'quit' to stop\n")
+
+   while True:
+      message = input("Message: ").strip()
+
+      if message.lower() == "quit":
+          break
+      if message == "":
+         continue
+
+      label, confidence = classify(message, model)
+      print(f"-> I think this is: {label.upper()} ({confidence}% confident)")
+
+      feedback = input("Was that correct? (yes/no): ").strip().lower()
+      if feedback in ("no", "n"):
+         correct_label = input("What should it have been? (spam/not spam): ").strip().lower()
+         if correct_label in ("spam", "not spam"):
+            training_data.append((message, correct_label))
+            model = train(training_data)  # retrain with the new example
+            save_training_data(training_data)
+            print("Thanks! I've learned from that and will remember it.\n")
+         else:
+            print("Please type exactly 'spam' or 'not spam' next time.\n")
+      else:
+         print()
+
+   print(f"\nFinal training set size: {len(training_data)} messages.")
+   print("See you next time - I'll remember everything I learned!")
+
+
+if __name__ == "__main__":
+   main()
